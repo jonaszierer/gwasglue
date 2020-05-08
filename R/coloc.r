@@ -60,6 +60,98 @@ gwasvcf_to_coloc <- function(vcf1, vcf2, chrompos)
 }
 
 
+
+
+#' Generate coloc dataset from vcf files
+#'
+#' @param vcf1 VCF object or path to vcf file
+#' @param vcf2 VCF object or path to vcf file
+#' @param chrompos Character of chr:pos1-pos2
+#'
+#' @export
+#' @return List of datasets to feed into coloc
+gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
+                              bfile,
+                              plink_bin = getOption("tools_plink")){
+
+    data <- list(d1 = vcf1, d2 = vcf2) %>% map(~{
+        ## associations
+        query_gwas(.x, chrompos = chrompos)
+    })
+    
+    ## exclude SNPs with mismatchd alleles
+    alleles  <- data %>%
+        map(~{
+            .x %>%
+                vcf_to_granges() %>%
+                dplyr::as_tibble() %>%
+                transmute(ID, start ,end, REF, ALT)
+        })
+    alleles <- full_join(alleles[[1]],
+                         alleles[[2]],
+                         by = "ID", suffix = c(".1", ".2")) 
+    excl <- alleles %>%
+        mutate(excl = #(start.1 != start.2) |
+                   #(end.1 != end.2) |
+                   ((REF.1 != REF.2) & (REF.1 != ALT.2)) |
+                   ((ALT.1 != ALT.2) & (ALT.1 != REF.2))) %>% 
+        filter(!is.na(excl) & excl) %>%
+        pull(ID)
+    
+    ## FORMAT
+    data <- data %>% map(~{
+        ## filter invalids
+        gr   <- vcf_to_granges(.x)
+        rsid <- names(gr)[ is.finite(gr$ES) &
+                            is.finite(gr$SE)]
+        rsid <- rsid[ !(rsid %in% excl)]
+        as   <- .x[rsid]
+        ## type
+        type <- as %>%
+            VariantAnnotation::header() %>%
+            VariantAnnotation::meta() %>%
+            .$SAMPLE %>%
+            .$StudyType
+        type <- ifelse(type == "Continuous", "quant", "cc")
+        ## data.frame
+        asdf <- as %>%
+            vcf_to_granges() %>%
+            dplyr::as_tibble()
+        ## MAF
+        if(all(is.na(asdf$AF))){
+            MAF <- af_matrix(variants = asdf$ID,
+                             bfile = bfile,
+                             plink_bin = plink_bin)
+            asdf$AF <- MAF[asdf$ID, ]
+        }
+        ## put together
+        list(N        = asdf$SS,
+             s        = asdf$NC/asdf$SS,
+             pvalues  = 10**-asdf$LP,
+             MAF      = asdf$AF,
+             beta     = asdf$ES,
+             varbeta  = asdf$SE^2,
+             type     = type,
+             snp      = asdf$ID)
+    })
+
+    ## LD
+    rs <- data %>%
+        map("snp") %>%
+        unlist() %>%
+        unique()
+    ld <- suppressWarnings({
+        ieugwasr::ld_matrix(rs,
+                            bfile,
+                            plink_bin,
+                            with_alleles=FALSE)})
+    data$LD <- ld
+    ## RETURN
+    return(data)
+}
+
+
+
 #' Generate coloc dataset from the IEU GWAS database
 #'
 #' @param id1 ID for trait 1
