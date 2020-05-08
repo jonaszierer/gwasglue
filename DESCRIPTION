@@ -1,6 +1,6 @@
 Package: gwasglue
 Title: GWAS summary data sources connected to analytical tools
-Version: 0.0.0.9000
+Version: 0.0.0.9001
 Authors@R: 
     person(given = "Gibran",
            family = "Hemani",
