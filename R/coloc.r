@@ -73,7 +73,7 @@ gwasvcf_to_coloc <- function(vcf1, vcf2, chrompos)
 gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
                               bfile,
                               plink_bin = getOption("tools_plink")){
-
+    
     data <- list(d1 = vcf1, d2 = vcf2) %>% map(~{
         ## associations
         query_gwas(.x, chrompos = chrompos)
@@ -85,12 +85,12 @@ gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
             .x %>%
                 vcf_to_granges() %>%
                 dplyr::as_tibble() %>%
-                transmute(ID, start ,end, REF, ALT)
+                transmute(ID = names(.x), start ,end, REF, ALT)
         })
     alleles <- full_join(alleles[[1]],
                          alleles[[2]],
                          by = "ID", suffix = c(".1", ".2")) 
-    excl <- alleles %>%
+    excl_alleles <- alleles %>%
         mutate(excl = #(start.1 != start.2) |
                    #(end.1 != end.2) |
                    ((REF.1 != REF.2) & (REF.1 != ALT.2)) |
@@ -98,13 +98,28 @@ gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
         filter(!is.na(excl) & excl) %>%
         pull(ID)
     
+    ## LD
+    rs <- data %>%
+        map(names) %>%
+        unlist() %>%
+        unique()
+    ld <- suppressWarnings({
+        ieugwasr::ld_matrix(rs,
+                            bfile,
+                            plink_bin,
+                            with_alleles=FALSE)})
+
+    ## exclude SNPs missing from LD
+    excl_ld <- rs[ !(rs %in% rownames(ld)) ]
+    
     ## FORMAT
     data <- data %>% map(~{
         ## filter invalids
         gr   <- vcf_to_granges(.x)
         rsid <- names(gr)[ is.finite(gr$ES) &
                             is.finite(gr$SE)]
-        rsid <- rsid[ !(rsid %in% excl)]
+        rsid <- rsid[ !(rsid %in% excl_alleles)]
+        rsid <- rsid[ !(rsid %in% excl_ld)]
         as   <- .x[rsid]
         ## type
         type <- as %>%
@@ -116,13 +131,19 @@ gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
         ## data.frame
         asdf <- as %>%
             vcf_to_granges() %>%
-            dplyr::as_tibble()
+            dplyr::as_tibble() %>%
+            mutate(ID = names(as))
         ## MAF
         if(all(is.na(asdf$AF))){
-            MAF <- af_matrix(variants = asdf$ID,
-                             bfile = bfile,
-                             plink_bin = plink_bin)
-            asdf$AF <- MAF[asdf$ID, ]
+            MAF <- af_matrix(variants  = asdf$ID,
+                             bfile     = bfile,
+                             plink_bin = plink_bin) %>%
+                as.data.frame() %>%
+                dplyr::rename(AF = MAF) %>%
+                rownames_to_column("ID")
+            asdf <- asdf %>%
+                dplyr::select(-AF) %>%
+                left_join(MAF, by = "ID")
         }
         ## put together
         list(N        = asdf$SS,
@@ -132,21 +153,12 @@ gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
              beta     = asdf$ES,
              varbeta  = asdf$SE^2,
              type     = type,
+             position = asdf$start,
              snp      = asdf$ID)
     })
 
-    ## LD
-    rs <- data %>%
-        map("snp") %>%
-        unlist() %>%
-        unique()
-    ld <- suppressWarnings({
-        ieugwasr::ld_matrix(rs,
-                            bfile,
-                            plink_bin,
-                            with_alleles=FALSE)})
-    data$LD <- ld
     ## RETURN
+    data$LD <- ld
     return(data)
 }
 
