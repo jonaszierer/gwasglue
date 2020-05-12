@@ -108,7 +108,7 @@ gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
                             bfile,
                             plink_bin,
                             with_alleles=FALSE)})
-
+    ld <- greedy_remove(ld)
     ## exclude SNPs missing from LD
     excl_ld <- rs[ !(rs %in% rownames(ld)) ]
     
