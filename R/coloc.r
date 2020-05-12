@@ -62,14 +62,14 @@ gwasvcf_to_coloc <- function(vcf1, vcf2, chrompos)
 
 
 
-#' Generate coloc dataset from vcf files
+#' Generate coloc v4  dataset from vcf files
 #'
 #' @param vcf1 VCF object or path to vcf file
 #' @param vcf2 VCF object or path to vcf file
 #' @param chrompos Character of chr:pos1-pos2
 #'
 #' @export
-#' @return List of datasets to feed into coloc
+#' @return List of datasets to feed into coloc (v4)
 gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
                               bfile,
                               plink_bin = getOption("tools_plink")){
