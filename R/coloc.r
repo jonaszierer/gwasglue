@@ -74,10 +74,9 @@ gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
                               bfile,
                               plink_bin = getOption("tools_plink")){
     
-    data <- list(d1 = vcf1, d2 = vcf2) %>% map(~{
-        ## associations
-        query_gwas(.x, chrompos = chrompos)
-    })
+    data    <- list()
+    data$d1 <- query_gwas(vcf1, chrompos = chrompos)
+    data$d2 <- query_gwas(vcf2, rsid = names(data$d1))
     
     ## exclude SNPs with mismatchd alleles
     alleles  <- data %>%
