@@ -78,25 +78,6 @@ gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
     data$d1 <- query_gwas(vcf1, chrompos = chrompos)
     data$d2 <- query_gwas(vcf2, rsid = names(data$d1))
     
-    ## exclude SNPs with mismatchd alleles
-    alleles  <- data %>%
-        map(~{
-            .x %>%
-                vcf_to_granges() %>%
-                dplyr::as_tibble() %>%
-                transmute(ID = names(.x), start ,end, REF, ALT)
-        })
-    alleles <- full_join(alleles[[1]],
-                         alleles[[2]],
-                         by = "ID", suffix = c(".1", ".2")) 
-    excl_alleles <- alleles %>%
-        mutate(excl = #(start.1 != start.2) |
-                   #(end.1 != end.2) |
-                   ((REF.1 != REF.2) & (REF.1 != ALT.2)) |
-                   ((ALT.1 != ALT.2) & (ALT.1 != REF.2))) %>% 
-        filter(!is.na(excl) & excl) %>%
-        pull(ID)
-    
     ## LD
     rs <- data %>%
         map(names) %>%
@@ -110,15 +91,20 @@ gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
     ld <- greedy_remove(ld)
     ## exclude SNPs missing from LD
     excl_ld <- rs[ !(rs %in% rownames(ld)) ]
+
+    ## alleles
+    alleles <- data$d1 %>%
+        vcf_to_tibble() %>%
+        distinct(SNP, ALT, REF) %>%
+        filter(!duplicated(SNP))
     
     ## FORMAT
     data <- data %>% map(~{
         ## filter invalids
         gr   <- vcf_to_granges(.x)
         rsid <- names(gr)[ is.finite(gr$ES) &
-                            is.finite(gr$SE)]
-        rsid <- rsid[ !(rsid %in% excl_alleles)]
-        rsid <- rsid[ !(rsid %in% excl_ld)]
+                           is.finite(gr$SE)]
+        rsid <- unique(rsid[ !(rsid %in% excl_ld)])
         as   <- .x[rsid]
         ## type
         type <- as %>%
@@ -131,7 +117,8 @@ gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
         asdf <- as %>%
             vcf_to_granges() %>%
             dplyr::as_tibble() %>%
-            mutate(ID = names(as))
+            mutate(SNP = names(as)) %>%
+            inner_join(alleles, by = c("REF", "ALT", "SNP"))
         ## MAF
         if(all(is.na(asdf$AF))){
             MAF <- af_matrix(variants  = asdf$ID,
@@ -153,7 +140,7 @@ gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
              varbeta  = asdf$SE^2,
              type     = type,
              position = asdf$start,
-             snp      = asdf$ID)
+             snp      = asdf$SNP)
     })
 
     ## RETURN
