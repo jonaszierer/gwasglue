@@ -115,9 +115,7 @@ gwasvcf_to_coloc4 <- function(vcf1, vcf2, chrompos,
         type <- ifelse(type == "Continuous", "quant", "cc")
         ## data.frame
         asdf <- as %>%
-            vcf_to_granges() %>%
-            dplyr::as_tibble() %>%
-            mutate(SNP = names(as)) %>%
+            vcf_to_tibble() %>%
             inner_join(alleles, by = c("REF", "ALT", "SNP"))
         ## MAF
         if(all(is.na(asdf$AF))){
