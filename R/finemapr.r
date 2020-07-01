@@ -50,10 +50,89 @@ print.FinemaprList <- function(x)
 	utils::str(x)
 }
 
-
-gwasvcf_to_finemapr <- function(region, vcf)
+#' Generate data for analysis in various finemapping methods
+#'
+#' Uses the finemapr package https://github.com/variani/finemapr
+#'
+#' @param region Region of the genome to extract eg 1:109317192-110317192"
+#' @param vcf list of paths to gwasvcf files
+#' @param bfile If this is provided then will use the API. Default = NULL
+#' @param plink_bin If null and bfile is not null then will detect packaged plink binary for specific OS. Otherwise specify path to plink binary. Default = NULL
+#'
+#' @importFrom purrr map
+#' @importFrom gwasvcf query_gwas vcf_to_granges
+#' @importFrom ieugwasr ld_matrix
+#' @importFrom dplyr transmute
+#' @importFrom tibble as_tibble
+#' 
+#' @export
+#' @return Each vcf will be a list of z score data, ld matrix, and sample size
+gwasvcf_to_finemapr <- function(region, vcf,
+                                bfile     = NULL,
+                                plink_bin = getOption("tools_plink"))
 {
-	NULL
+    out <- regions %>%
+        unique() %>%
+        setNames(., .) %>%
+        map(~{
+            ## associations
+            as   <- query_gwas(vcf, chrompos = .x)
+            ## filter invalids
+            gr <- vcf_to_granges(as)
+            rsid  <- names(gr)[ is.finite(gr$ES) &
+                                is.finite(gr$SE)]
+            as  <- as[rsid]
+            ## get LD
+            ld <- NULL
+            rsid_avail <- rsid
+            if(!is.null(bfile) & !is.null(plink_bin)){
+                ld <- suppressWarnings({
+                    ieugwasr::ld_matrix(rsid,
+                                        bfile,
+                                        plink_bin,
+                                        with_alleles=FALSE)})
+                ld <- greedy_remove(ld)
+                rsid_avail <- rownames(ld)
+            }
+            ## subset
+            as <- as[rsid_avail, ]
+            ld <- ld[rsid_avail, rsid_avail]
+            ## format AS
+            asdf <- as %>%
+                vcf_to_granges() %>%
+                dplyr::as_tibble()
+            ## cases
+            n <-  asdf$SS
+            if(all(is.na(n))){
+                n <- as %>%
+                    VariantAnnotation::header() %>%
+                    VariantAnnotation::meta() %>%
+                    .$SAMPLE %>%
+                    .$TotalControls %>%
+                    as.numeric()
+            }
+            ## put together
+            dat <- list(
+                z  = asdf %>%
+                    transmute(rsid = ID,
+                              z    = ifelse(!is.na(EZ), EZ, ES/SE)) %>%
+                    as.data.frame(),
+                LD       = ld,
+                N        = n,
+                s        = max(asdf$NC)/max(n),
+                pvalues  = 10**-asdf$LP,
+                MAF      = asdf$AF,
+                beta     = asdf$ES,
+                varbeta  = asdf$SE^2,
+                type     = type,
+                snp      = asdf$ID
+            )
+            dat
+        })
+
+    ## and return
+    class(out) <- "FinemaprList"
+    return(out)
 }
 
 
